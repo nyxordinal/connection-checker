@@ -80,9 +80,15 @@ func main() {
 		return
 	}
 
-	htmlTemplate, err := loadHTMLTemplate("email_template.html")
+	alertHtml, err := loadHTMLTemplate("email_alert.html")
 	if err != nil {
-		logger.Fatalf("Failed to load email template: %v", err)
+		logger.Fatalf("Failed to load alert email template: %v", err)
+		return
+	}
+
+	restoredHtml, err := loadHTMLTemplate("email_restored.html")
+	if err != nil {
+		logger.Fatalf("Failed to load restored email template: %v", err)
 		return
 	}
 
@@ -93,8 +99,7 @@ func main() {
 			mutex.Lock()
 			if !alertSent {
 				timestamp := time.Now().UTC().Format("2006-01-02 15:04:05 MST")
-				err := sendEmail(config, "Connection Alert", fmt.Sprintf(htmlTemplate, config.TargetIP, config.TargetPort, timestamp))
-				if err != nil {
+				if err := sendEmail(config, "Connection Alert", fmt.Sprintf(alertHtml, config.TargetIP, config.TargetPort, timestamp)); err != nil {
 					logger.Errorf("Failed to send email: %v", err)
 				} else {
 					logger.Info("Alert email sent")
@@ -105,7 +110,15 @@ func main() {
 		} else {
 			logger.Infof("Connection to %s:%s is healthy.", config.TargetIP, config.TargetPort)
 			mutex.Lock()
-			alertSent = false // Reset alert status when connection is healthy
+			if alertSent {
+				timestamp := time.Now().UTC().Format("2006-01-02 15:04:05 MST")
+				if err := sendEmail(config, "Connection Restored", fmt.Sprintf(restoredHtml, config.TargetIP, config.TargetPort, timestamp)); err != nil {
+					logger.Errorf("Failed to send email: %v", err)
+				} else {
+					logger.Info("Restored email sent")
+					alertSent = false
+				}
+			}
 			mutex.Unlock()
 		}
 		time.Sleep(config.CheckInterval * time.Millisecond)
