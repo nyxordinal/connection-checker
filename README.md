@@ -30,7 +30,7 @@ The application requires a JSON configuration file to set up its parameters. Bel
   "sender_email": "your_email@example.com",
   "sender_password": "your_password",
   "recipient_email": "admin@example.com",
-  "check_interval": 30,
+  "check_interval": 5000,
   "reset_token": "resettoken",
   "rate_limit_threshold": 5
 }
@@ -46,7 +46,7 @@ The application requires a JSON configuration file to set up its parameters. Bel
 - **`sender_email`**: The email address used to send the notification emails.
 - **`sender_password`**: The password for the sender email account.
 - **`recipient_email`**: The email address that will receive the alert notifications.
-- **`check_interval`**: The interval (in seconds) at which the connection to the target server is checked.
+- **`check_interval`**: The interval (in milliseconds) at which the connection to the target server is checked.
 - **`reset_token`**: The token required to authorize requests to the reset endpoint.
 - **`rate_limit_threshold`**: The maximum number of reset endpoint requests allowed per second.
 

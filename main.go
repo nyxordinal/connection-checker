@@ -108,7 +108,7 @@ func main() {
 			alertSent = false // Reset alert status when connection is healthy
 			mutex.Unlock()
 		}
-		time.Sleep(config.CheckInterval)
+		time.Sleep(config.CheckInterval * time.Millisecond)
 	}
 }
 
