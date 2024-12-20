@@ -1,7 +1,6 @@
 {
   "app_port": "8080",
   "target_ip": "192.168.1.2",
-  "target_port": "51820",
   "smtp_server": "smtp.example.com",
   "smtp_port": "587",
   "sender_email": "your_email@example.com",

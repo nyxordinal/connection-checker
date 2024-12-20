@@ -11,13 +11,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-ping/ping"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 )
 
 type Config struct {
 	TargetIP           string        `json:"target_ip"`
-	TargetPort         string        `json:"target_port"`
 	SMTPServer         string        `json:"smtp_server"`
 	SMTPPort           string        `json:"smtp_port"`
 	SenderEmail        string        `json:"sender_email"`
@@ -92,14 +92,25 @@ func main() {
 		return
 	}
 
+	pinger, err := ping.NewPinger(config.TargetIP)
+	if err != nil {
+		logger.Fatalf("Failed to create pinger: %v", err)
+		return
+	}
+
+	pinger.Count = 1
+	pinger.OnRecv = func(pkt *ping.Packet) {
+		logger.Infof("Received response from %s: seq=%d time=%v", pkt.IPAddr, pkt.Seq, pkt.Rtt)
+	}
+
 	go startHTTPServer(config.AppPort, config.ResetToken, config.RateLimitThreshold)
 
 	for {
-		if !checkConnection(config.TargetIP, config.TargetPort) {
+		if !checkConnection(pinger, config.TargetIP) {
 			mutex.Lock()
 			if !alertSent {
 				timestamp := time.Now().UTC().Format("2006-01-02 15:04:05 MST")
-				if err := sendEmail(config, "Connection Alert", fmt.Sprintf(alertHtml, config.TargetIP, config.TargetPort, timestamp)); err != nil {
+				if err := sendEmail(config, "Connection Alert", fmt.Sprintf(alertHtml, config.TargetIP, timestamp)); err != nil {
 					logger.Errorf("Failed to send email: %v", err)
 				} else {
 					logger.Info("Alert email sent")
@@ -108,11 +119,11 @@ func main() {
 			}
 			mutex.Unlock()
 		} else {
-			logger.Infof("Connection to %s:%s is healthy.", config.TargetIP, config.TargetPort)
+			logger.Infof("Connection to %s is healthy.", config.TargetIP)
 			mutex.Lock()
 			if alertSent {
 				timestamp := time.Now().UTC().Format("2006-01-02 15:04:05 MST")
-				if err := sendEmail(config, "Connection Restored", fmt.Sprintf(restoredHtml, config.TargetIP, config.TargetPort, timestamp)); err != nil {
+				if err := sendEmail(config, "Connection Restored", fmt.Sprintf(restoredHtml, config.TargetIP, timestamp)); err != nil {
 					logger.Errorf("Failed to send email: %v", err)
 				} else {
 					logger.Info("Restored email sent")
@@ -125,14 +136,11 @@ func main() {
 	}
 }
 
-func checkConnection(ip, port string) bool {
-	address := net.JoinHostPort(ip, port)
-	conn, err := net.DialTimeout("tcp", address, 5*time.Second)
-	if err != nil {
-		logger.Warnf("Connection failed: %v", err)
+func checkConnection(pinger *ping.Pinger, ip string) bool {
+	if err := pinger.Run(); err != nil {
+		logger.Warnf("Failed to ping %s: %v", ip, err)
 		return false
 	}
-	defer conn.Close()
 	return true
 }
 
