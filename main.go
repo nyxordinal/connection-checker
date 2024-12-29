@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -149,6 +150,12 @@ func startHTTPServer(db *Database, port, resetToken string, rateLimitThreshold i
 
 		status, lastEmailSent, err := db.getConnectionStatus()
 		if err != nil {
+			if err == sql.ErrNoRows {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]string{"connection_status": "unknown", "last_email_sent": ""})
+				return
+			}
+
 			logger.Errorf("Failed to fetch connection status: %v", err)
 			http.Error(w, "Failed to fetch connection status", http.StatusInternalServerError)
 			return
