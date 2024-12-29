@@ -3,31 +3,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"net"
 	"net/http"
-	"net/smtp"
-	"os"
 	"sync"
 	"time"
 
-	"github.com/go-ping/ping"
+	probing "github.com/prometheus-community/pro-bing"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 )
-
-type Config struct {
-	TargetIP           string        `json:"target_ip"`
-	SMTPServer         string        `json:"smtp_server"`
-	SMTPPort           string        `json:"smtp_port"`
-	SenderEmail        string        `json:"sender_email"`
-	SenderPassword     string        `json:"sender_password"`
-	RecipientEmail     string        `json:"recipient_email"`
-	CheckInterval      time.Duration `json:"check_interval"`
-	AppPort            string        `json:"app_port"`
-	ResetToken         string        `json:"reset_token"`
-	RateLimitThreshold int           `json:"rate_limit_threshold"`
-}
 
 var (
 	alertSent bool
@@ -39,38 +22,6 @@ type JsonResponse struct {
 	Message string `json:"message"`
 }
 
-func CreateLogger(level logrus.Level) *logrus.Logger {
-	logger := logrus.New()
-	logger.SetFormatter(&logrus.JSONFormatter{
-		TimestampFormat: "2006-01-02T15:04:05Z07:00",
-	})
-	logger.SetLevel(level)
-	return logger
-}
-
-func loadConfig(filename string) (*Config, error) {
-	file, err := os.Open(filename)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	var config Config
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&config); err != nil {
-		return nil, err
-	}
-	return &config, nil
-}
-
-func loadHTMLTemplate(filename string) (string, error) {
-	data, err := ioutil.ReadFile(filename)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
 func main() {
 	logger = CreateLogger(logrus.InfoLevel)
 
@@ -80,33 +31,34 @@ func main() {
 		return
 	}
 
-	alertHtml, err := loadHTMLTemplate("email_alert.html")
+	alertHtml, restoredHtml, err := getHTMLTemplates()
 	if err != nil {
-		logger.Fatalf("Failed to load alert email template: %v", err)
+		logger.Fatalf("Failed to get HTML template: %v", err)
 		return
 	}
 
-	restoredHtml, err := loadHTMLTemplate("email_restored.html")
-	if err != nil {
-		logger.Fatalf("Failed to load restored email template: %v", err)
+	db := &Database{}
+	if err := db.initDB(); err != nil {
+		logger.Fatalf("Failed to setup database: %v", err)
 		return
 	}
 
-	pinger, err := ping.NewPinger(config.TargetIP)
+	pinger, err := probing.NewPinger(config.TargetIP)
 	if err != nil {
 		logger.Fatalf("Failed to create pinger: %v", err)
 		return
 	}
 
 	pinger.Count = 1
-	pinger.OnRecv = func(pkt *ping.Packet) {
+	pinger.OnRecv = func(pkt *probing.Packet) {
 		logger.Infof("Received response from %s: seq=%d time=%v", pkt.IPAddr, pkt.Seq, pkt.Rtt)
 	}
 
-	go startHTTPServer(config.AppPort, config.ResetToken, config.RateLimitThreshold)
+	go startHTTPServer(db, config.AppPort, config.ResetToken, config.RateLimitThreshold)
 
 	for {
 		if !checkConnection(pinger, config.TargetIP) {
+			db.logConnectionStatus("failed")
 			mutex.Lock()
 			if !alertSent {
 				timestamp := time.Now().UTC().Format("2006-01-02 15:04:05 MST")
@@ -116,9 +68,14 @@ func main() {
 					logger.Info("Alert email sent")
 					alertSent = true
 				}
+
+				if err := db.updateConnectionStatus("failed", timestamp); err != nil {
+					logger.Errorf("Failed to update connection status in DB: %v", err)
+				}
 			}
 			mutex.Unlock()
 		} else {
+			db.logConnectionStatus("success")
 			logger.Infof("Connection to %s is healthy.", config.TargetIP)
 			mutex.Lock()
 			if alertSent {
@@ -129,6 +86,10 @@ func main() {
 					logger.Info("Restored email sent")
 					alertSent = false
 				}
+
+				if err := db.updateConnectionStatus("failed", timestamp); err != nil {
+					logger.Errorf("Failed to update connection status in DB: %v", err)
+				}
 			}
 			mutex.Unlock()
 		}
@@ -136,7 +97,7 @@ func main() {
 	}
 }
 
-func checkConnection(pinger *ping.Pinger, ip string) bool {
+func checkConnection(pinger *probing.Pinger, ip string) bool {
 	if err := pinger.Run(); err != nil {
 		logger.Warnf("Failed to ping %s: %v", ip, err)
 		return false
@@ -144,25 +105,12 @@ func checkConnection(pinger *ping.Pinger, ip string) bool {
 	return true
 }
 
-func sendEmail(config *Config, subject, body string) error {
-	auth := smtp.PlainAuth("", config.SenderEmail, config.SenderPassword, config.SMTPServer)
-	msg := []byte(fmt.Sprintf("To: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=\"UTF-8\"\r\n\r\n%s\r\n", config.RecipientEmail, subject, body))
-
-	err := smtp.SendMail(
-		net.JoinHostPort(config.SMTPServer, config.SMTPPort),
-		auth,
-		config.SenderEmail,
-		[]string{config.RecipientEmail},
-		msg,
-	)
-	return err
-}
-
-func startHTTPServer(port, resetToken string, rateLimitThreshold int) {
-	rateLimiter := rate.NewLimiter(rate.Every(1*time.Second), rateLimitThreshold)
+func startHTTPServer(db *Database, port, resetToken string, rateLimitThreshold int) {
+	rateLimiterPerSecond := rate.NewLimiter(rate.Every(1*time.Second), rateLimitThreshold)
+	rateLimiterPerMinute := rate.NewLimiter(rate.Every(1*time.Minute), rateLimitThreshold)
 
 	http.HandleFunc("/reset-alert", func(w http.ResponseWriter, r *http.Request) {
-		if !rateLimiter.Allow() {
+		if !rateLimiterPerSecond.Allow() {
 			logger.Warn("Rate limit reached because of too many requests")
 			return
 		}
@@ -192,6 +140,57 @@ func startHTTPServer(port, resetToken string, rateLimitThreshold int) {
 			logger.Error("Failed to encode JSON response: ", err)
 		}
 	})
+
+	http.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+		if !rateLimiterPerMinute.Allow() {
+			logger.Warn("Rate limit reached because of too many requests")
+			return
+		}
+
+		status, lastEmailSent, err := db.getConnectionStatus()
+		if err != nil {
+			http.Error(w, "Failed to fetch connection status", http.StatusInternalServerError)
+			return
+		}
+
+		response := map[string]string{
+			"connection_status": status,
+			"last_email_sent":   lastEmailSent,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	})
+
+	http.HandleFunc("/logs", func(w http.ResponseWriter, r *http.Request) {
+		if !rateLimiterPerSecond.Allow() {
+			logger.Warn("Rate limit reached because of too many requests")
+			return
+		}
+
+		page := 1
+		perPage := 25
+		if r.URL.Query().Get("page") != "" {
+			page = atoi(r.URL.Query().Get("page"))
+		}
+		if r.URL.Query().Get("per_page") != "" {
+			perPage = atoi(r.URL.Query().Get("per_page"))
+		}
+
+		logs, err := db.getConnectionLogs(page, perPage)
+		if err != nil {
+			logger.Errorf("Failed to fetch logs: %v", err)
+			http.Error(w, "Failed to fetch logs", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(logs); err != nil {
+			logger.Errorf("Failed to encode logs: %v", err)
+			http.Error(w, "Failed to encode logs", http.StatusInternalServerError)
+		}
+	})
+
+	http.Handle("/", http.FileServer(http.Dir("./static")))
 
 	logger.Infof("HTTP server is running on port %s...", port)
 	if err := http.ListenAndServe(fmt.Sprintf(":%s", port), nil); err != nil {
