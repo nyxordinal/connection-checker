@@ -149,6 +149,7 @@ func startHTTPServer(db *Database, port, resetToken string, rateLimitThreshold i
 
 		status, lastEmailSent, err := db.getConnectionStatus()
 		if err != nil {
+			logger.Errorf("Failed to fetch connection status: %v", err)
 			http.Error(w, "Failed to fetch connection status", http.StatusInternalServerError)
 			return
 		}
