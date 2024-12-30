@@ -9,6 +9,7 @@ The **Connection Checker** is a lightweight Go-based worker that monitors the co
 - **Flag Control**: Prevents multiple consecutive email notifications for the same failure.
 - **Reset Endpoint**: An HTTP endpoint allows manual resetting of the notification flag.
 - **Rate Limiting**: Prevents excessive requests to the reset endpoint.
+- **Web UI**: A simple user interface to view the connection status
 
 ## Tools and Libraries Used
 
@@ -32,7 +33,10 @@ The application requires a JSON configuration file to set up its parameters. Bel
   "recipient_email": "admin@example.com",
   "check_interval": 5000,
   "reset_token": "resettoken",
-  "rate_limit_threshold": 5
+  "rate_limit_threshold": 5,
+  "jwt_secret": "secret",
+  "username": "username",
+  "password": "password"
 }
 ```
 
@@ -48,7 +52,10 @@ The application requires a JSON configuration file to set up its parameters. Bel
 - **`recipient_email`**: The email address that will receive the alert notifications.
 - **`check_interval`**: The interval (in milliseconds) at which the connection to the target server is checked.
 - **`reset_token`**: The token required to authorize requests to the reset endpoint.
-- **`rate_limit_threshold`**: The maximum number of reset endpoint requests allowed per second.
+- **`rate_limit_threshold`**: The rate limit threshold for endpoints.
+- **`jwt_secret`**: The secret key used for generating and validating JSON Web Tokens (JWT).
+- **`username`**: The username required for authentication (for endpoints that require login).
+- **`password`**: The password corresponding to the provided username.
 
 ## Endpoint Details
 

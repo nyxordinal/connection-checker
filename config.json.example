@@ -8,5 +8,8 @@
   "recipient_email": "admin@example.com",
   "check_interval": 5000,
   "reset_token": "resettoken",
-  "rate_limit_threshold": 5
+  "rate_limit_threshold": 5,
+  "jwt_secret": "secret",
+  "username": "username",
+  "password": "password"
 }

@@ -4,7 +4,115 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Connection Status and Logs</title>
+    <title>Connection Status</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f9f9f9;
+            color: #333;
+        }
+
+        h1 {
+            text-align: center;
+            background-color: #4CAF50;
+            color: white;
+            padding: 15px;
+            margin: 0;
+        }
+
+        section {
+            margin: 20px auto;
+            max-width: 800px;
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+
+        table th,
+        table td {
+            padding: 5px 8px;
+            /* Reduced padding for more compact appearance */
+            border: 1px solid #ddd;
+            text-align: left;
+            font-size: 14px;
+            /* Smaller font size */
+        }
+
+        table th {
+            background-color: #f2f2f2;
+        }
+
+        #connection-logs select {
+            padding: 4px;
+            margin-top: 10px;
+        }
+
+        #connection-logs div {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 10px;
+        }
+
+        button {
+            padding: 8px 12px;
+            border: none;
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        button:hover:not(:disabled) {
+            background-color: #45a049;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            section {
+                margin: 10px;
+                padding: 12px;
+            }
+
+            table th,
+            table td {
+                font-size: 13px;
+                /* Slightly smaller font size */
+            }
+
+            button {
+                padding: 7px 10px;
+                font-size: 13px;
+            }
+        }
+
+        @media (max-width: 480px) {
+
+            table th,
+            table td {
+                font-size: 12px;
+            }
+
+            button {
+                padding: 6px 10px;
+                font-size: 12px;
+            }
+        }
+    </style>
     <script>
         let currentPage = 1;
         let perPage = 25;
@@ -70,16 +178,16 @@
 </head>
 
 <body>
-    <h1>Connection Status and Logs</h1>
+    <h1>Connection Status</h1>
 
     <section id="connection-status">
         <h2>Current Connection Status</h2>
         <p><strong>Status:</strong> <span id="status">Loading...</span></p>
-        <p><strong>Last Email Sent:</strong> <span id="last-email">Loading...</span></p>
+        <p><strong>Last Notification Sent:</strong> <span id="last-email">Loading...</span></p>
     </section>
 
     <section id="connection-logs">
-        <h2>Connection Logs</h2>
+        <h2>Connection Check Logs</h2>
 
         <!-- Controls for changing items per page -->
         <div>

@@ -17,6 +17,9 @@ type Config struct {
 	AppPort            string        `json:"app_port"`
 	ResetToken         string        `json:"reset_token"`
 	RateLimitThreshold int           `json:"rate_limit_threshold"`
+	JWTSecret          string        `json:"jwt_secret"`
+	Username           string        `json:"username"`
+	Password           string        `json:"password"`
 }
 
 func loadConfig(filename string) (*Config, error) {
@@ -31,5 +34,6 @@ func loadConfig(filename string) (*Config, error) {
 	if err := decoder.Decode(&config); err != nil {
 		return nil, err
 	}
+
 	return &config, nil
 }

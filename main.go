@@ -1,8 +1,6 @@
 package main
 
 import (
-	"database/sql"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
@@ -13,195 +11,116 @@ import (
 	"golang.org/x/time/rate"
 )
 
-var (
-	alertSent bool
-	mutex     sync.Mutex
-	logger    *logrus.Logger
-)
+type AppContext struct {
+	AlertSent bool
+	Mutex     sync.Mutex
+	Logger    *logrus.Logger
+	Config    *Config
+	DB        *Database
+}
+
+var appCtx AppContext
 
 type JsonResponse struct {
 	Message string `json:"message"`
 }
 
-func main() {
-	logger = CreateLogger(logrus.InfoLevel)
+func initApp() {
+	appCtx.Logger = CreateLogger(logrus.InfoLevel)
 
 	config, err := loadConfig("config.json")
 	if err != nil {
-		logger.Fatalf("Failed to load configuration: %v", err)
+		appCtx.Logger.Fatalf("Failed to load configuration: %v", err)
 		return
 	}
+	appCtx.Config = config
+
+	db, err := initDB()
+	if err != nil {
+		appCtx.Logger.Fatalf("Failed to setup database: %v", err)
+		return
+	}
+	appCtx.DB = db
+}
+
+func main() {
+	initApp() // Must be called before using appCtx
 
 	alertHtml, restoredHtml, err := getHTMLTemplates()
 	if err != nil {
-		logger.Fatalf("Failed to get HTML template: %v", err)
+		appCtx.Logger.Fatalf("Failed to get HTML template: %v", err)
 		return
 	}
 
-	db := &Database{}
-	if err := db.initDB(); err != nil {
-		logger.Fatalf("Failed to setup database: %v", err)
-		return
-	}
-
-	pinger, err := probing.NewPinger(config.TargetIP)
+	pinger, err := probing.NewPinger(appCtx.Config.TargetIP)
 	if err != nil {
-		logger.Fatalf("Failed to create pinger: %v", err)
+		appCtx.Logger.Fatalf("Failed to create pinger: %v", err)
 		return
 	}
 
 	pinger.Count = 1
 	pinger.OnRecv = func(pkt *probing.Packet) {
-		logger.Infof("Received response from %s: seq=%d time=%v", pkt.IPAddr, pkt.Seq, pkt.Rtt)
+		appCtx.Logger.Infof("Received response from %s: seq=%d time=%v", pkt.IPAddr, pkt.Seq, pkt.Rtt)
 	}
 
-	go startHTTPServer(db, config.AppPort, config.ResetToken, config.RateLimitThreshold)
+	go startHTTPServer()
 
 	for {
-		if !checkConnection(pinger, config.TargetIP) {
-			db.logConnectionStatus("failed")
-			mutex.Lock()
-			if !alertSent {
-				timestamp := time.Now().UTC().Format("2006-01-02 15:04:05 MST")
-				if err := sendEmail(config, "Connection Alert", fmt.Sprintf(alertHtml, config.TargetIP, timestamp)); err != nil {
-					logger.Errorf("Failed to send email: %v", err)
-				} else {
-					logger.Info("Alert email sent")
-					alertSent = true
-				}
-
-				if err := db.updateConnectionStatus("failed", timestamp); err != nil {
-					logger.Errorf("Failed to update connection status in DB: %v", err)
-				}
-			}
-			mutex.Unlock()
+		if !checkConnection(pinger, appCtx.Config.TargetIP) {
+			handleConnectionStatus("Failed", "Connection Alert", alertHtml)
 		} else {
-			db.logConnectionStatus("success")
-			logger.Infof("Connection to %s is healthy.", config.TargetIP)
-			mutex.Lock()
-			if alertSent {
-				timestamp := time.Now().UTC().Format("2006-01-02 15:04:05 MST")
-				if err := sendEmail(config, "Connection Restored", fmt.Sprintf(restoredHtml, config.TargetIP, timestamp)); err != nil {
-					logger.Errorf("Failed to send email: %v", err)
-				} else {
-					logger.Info("Restored email sent")
-					alertSent = false
-				}
-
-				if err := db.updateConnectionStatus("failed", timestamp); err != nil {
-					logger.Errorf("Failed to update connection status in DB: %v", err)
-				}
-			}
-			mutex.Unlock()
+			handleConnectionStatus("Healthy", "Connection Restored", restoredHtml)
 		}
-		time.Sleep(config.CheckInterval * time.Millisecond)
+		time.Sleep(appCtx.Config.CheckInterval * time.Millisecond)
+	}
+}
+
+func handleConnectionStatus(status, emailSubject, emailContent string) {
+	appCtx.Mutex.Lock()
+	defer appCtx.Mutex.Unlock()
+
+	if status == "Failed" && !appCtx.AlertSent {
+		sendAlertEmail(emailSubject, emailContent)
+		appCtx.AlertSent = true
+	} else if status == "Healthy" && appCtx.AlertSent {
+		sendAlertEmail(emailSubject, emailContent)
+		appCtx.AlertSent = false
+	}
+
+	if err := appCtx.DB.updateConnectionStatus(status); err != nil {
+		appCtx.Logger.Errorf("Failed to update connection status in DB: %v", err)
+	}
+
+	if err := appCtx.DB.logConnectionStatus(status); err != nil {
+		appCtx.Logger.Errorf("Failed to log connection status: %v", err)
 	}
 }
 
 func checkConnection(pinger *probing.Pinger, ip string) bool {
 	if err := pinger.Run(); err != nil {
-		logger.Warnf("Failed to ping %s: %v", ip, err)
+		appCtx.Logger.Warnf("Failed to ping %s: %v", ip, err)
 		return false
 	}
 	return true
 }
 
-func startHTTPServer(db *Database, port, resetToken string, rateLimitThreshold int) {
-	rateLimiterPerSecond := rate.NewLimiter(rate.Every(1*time.Second), rateLimitThreshold)
-	rateLimiterPerMinute := rate.NewLimiter(rate.Every(1*time.Minute), rateLimitThreshold)
+func createRateLimiter(limit int, interval time.Duration) *rate.Limiter {
+	return rate.NewLimiter(rate.Every(interval), limit)
+}
 
-	http.HandleFunc("/reset-alert", func(w http.ResponseWriter, r *http.Request) {
-		if !rateLimiterPerSecond.Allow() {
-			logger.Warn("Rate limit reached because of too many requests")
-			return
-		}
+func startHTTPServer() {
+	rateLimiterPerSecond := createRateLimiter(appCtx.Config.RateLimitThreshold, time.Second)
+	rateLimiterPerMinute := createRateLimiter(appCtx.Config.RateLimitThreshold, time.Minute)
 
-		if r.Method != http.MethodPost {
-			return
-		}
+	http.HandleFunc("/reset-alert", rateLimitedHandler(rateLimiterPerSecond, resetAlertHandler))
+	http.HandleFunc("/status", apiAuthMiddleware(rateLimitedHandler(rateLimiterPerMinute, statusHandler)))
+	http.HandleFunc("/logs", apiAuthMiddleware(rateLimitedHandler(rateLimiterPerSecond, logsHandler)))
 
-		token := r.Header.Get("Authorization")
-		if token == "" || token != resetToken {
-			logger.Warn("Unauthorized attempt to reset alert status")
-			return
-		}
+	http.HandleFunc("/login", authPageMiddleware(loginHandler))
+	http.HandleFunc("/", authMiddleware(indexHandler))
 
-		mutex.Lock()
-		alertSent = false
-		mutex.Unlock()
-
-		logger.Info("Alert status reset via HTTP endpoint")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-
-		response := JsonResponse{
-			Message: "Alert status reset successfully",
-		}
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			logger.Error("Failed to encode JSON response: ", err)
-		}
-	})
-
-	http.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
-		if !rateLimiterPerMinute.Allow() {
-			logger.Warn("Rate limit reached because of too many requests")
-			return
-		}
-
-		status, lastEmailSent, err := db.getConnectionStatus()
-		if err != nil {
-			if err == sql.ErrNoRows {
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]string{"connection_status": "unknown", "last_email_sent": ""})
-				return
-			}
-
-			logger.Errorf("Failed to fetch connection status: %v", err)
-			http.Error(w, "Failed to fetch connection status", http.StatusInternalServerError)
-			return
-		}
-
-		response := map[string]string{
-			"connection_status": status,
-			"last_email_sent":   lastEmailSent,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-	})
-
-	http.HandleFunc("/logs", func(w http.ResponseWriter, r *http.Request) {
-		if !rateLimiterPerSecond.Allow() {
-			logger.Warn("Rate limit reached because of too many requests")
-			return
-		}
-
-		page := 1
-		perPage := 25
-		if r.URL.Query().Get("page") != "" {
-			page = atoi(r.URL.Query().Get("page"))
-		}
-		if r.URL.Query().Get("per_page") != "" {
-			perPage = atoi(r.URL.Query().Get("per_page"))
-		}
-
-		logs, err := db.getConnectionLogs(page, perPage)
-		if err != nil {
-			logger.Errorf("Failed to fetch logs: %v", err)
-			http.Error(w, "Failed to fetch logs", http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(logs); err != nil {
-			logger.Errorf("Failed to encode logs: %v", err)
-			http.Error(w, "Failed to encode logs", http.StatusInternalServerError)
-		}
-	})
-
-	http.Handle("/", http.FileServer(http.Dir("./static")))
-
-	logger.Infof("HTTP server is running on port %s...", port)
-	if err := http.ListenAndServe(fmt.Sprintf(":%s", port), nil); err != nil {
-		logger.Fatal("Server failed: ", err)
+	appCtx.Logger.Infof("HTTP server is running on port %s...", appCtx.Config.AppPort)
+	if err := http.ListenAndServe(fmt.Sprintf(":%s", appCtx.Config.AppPort), nil); err != nil {
+		appCtx.Logger.Fatal("Server failed: ", err)
 	}
 }

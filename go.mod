@@ -3,6 +3,7 @@ module nyxordinal.dev/connection-checker
 go 1.21.0
 
 require (
+	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/glebarez/sqlite v1.11.0
 	github.com/prometheus-community/pro-bing v0.4.0
 	github.com/sirupsen/logrus v1.9.3
