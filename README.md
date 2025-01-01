@@ -7,7 +7,7 @@ The **Connection Checker** is a lightweight Go-based worker that monitors the co
 - **Connection Monitoring**: Periodically checks connectivity to the target server (IP and port).
 - **Email Notifications**: Sends an email alert to the configured recipient when a connection failure is detected.
 - **Flag Control**: Prevents multiple consecutive email notifications for the same failure.
-- **Reset Endpoint**: An HTTP endpoint allows manual resetting of the notification flag.
+- **Reset Endpoint**: Allows manual resetting of the notification flag.
 - **Rate Limiting**: Prevents excessive requests to the reset endpoint.
 - **Web UI**: A simple user interface to view the connection status
 
@@ -32,7 +32,6 @@ The application requires a JSON configuration file to set up its parameters. Bel
   "sender_password": "your_password",
   "recipient_email": "admin@example.com",
   "check_interval": 5000,
-  "reset_token": "resettoken",
   "rate_limit_threshold": 5,
   "jwt_secret": "secret",
   "username": "username",
@@ -51,7 +50,6 @@ The application requires a JSON configuration file to set up its parameters. Bel
 - **`sender_password`**: The password for the sender email account.
 - **`recipient_email`**: The email address that will receive the alert notifications.
 - **`check_interval`**: The interval (in milliseconds) at which the connection to the target server is checked.
-- **`reset_token`**: The token required to authorize requests to the reset endpoint.
 - **`rate_limit_threshold`**: The rate limit threshold for endpoints.
 - **`jwt_secret`**: The secret key used for generating and validating JSON Web Tokens (JWT).
 - **`username`**: The username required for authentication (for endpoints that require login).
@@ -59,19 +57,107 @@ The application requires a JSON configuration file to set up its parameters. Bel
 
 ## Endpoint Details
 
+### Index Endpoint
+
+- **URL**: `/`
+- **Method**: `GET`
+
+#### Description
+
+This endpoint serves the home page of the application.
+
+---
+
+### Login Page Endpoint
+
+- **URL**: `/login`
+- **Method**: `GET`
+
+#### Description
+
+This endpoint serves the login page for the application.
+
+---
+
+### Login API Endpoint
+
+- **URL**: `/login`
+- **Method**: `POST`
+- **Headers**:
+  - Content-Type: multipart/form-data
+
+Request Body (form-data)
+
+- username: The username of the user.
+- password: The password of the user.
+
+#### Example Request
+
+```bash
+curl -X POST http://localhost:8080/login \
+     -F "username=your_username" \
+     -F "password=your_password"
+```
+
+#### Description
+
+This endpoint handles user authentication by accepting the user's credentials via form-data. Upon successful authentication, the server generates and returns a JWT token that can be used for subsequent requests.
+
+---
+
+### Status Endpoint
+
+- **URL**: `/status`
+- **Method**: `GET`
+
+#### Description
+
+This endpoint returns the current status of the connection monitor.
+
+- **Success Response**: A JSON response with the connection status:
+  ```json
+  {
+    "connection_status": "Healthy",
+    "last_email_sent": "2025-01-01 06:56:43 UTC"
+  }
+  ```
+
+---
+
+### Logs Endpoint
+
+- **URL**: `/logs`
+- **Method**: `GET`
+- **Query Parameters**:
+  - page (optional): The page number of logs to retrieve. Defaults to 1 if not provided.
+  - per_page (optional): The number of log entries per page. Defaults to 25 if not provided.
+
+#### Description
+
+This endpoint provides the logs of the connection checks.
+
+- **Success Response**: A JSON response containing the logs:
+  ```json
+  [
+    {
+      "id": 1,
+      "status": "Healthy",
+      "timestamp": "2024-01-01 00:00:01 UTC"
+    }
+  ]
+  ```
+
+---
+
 ### Reset Alert Endpoint
 
 - **URL**: `/reset-alert`
 - **Method**: `POST`
-- **Headers**:
-  - `Authorization`: The reset token specified in the configuration file (`reset_token`).
-- **Rate Limit**: Limited to the number of requests specified by the `rate_limit_threshold` in the configuration.
 
 #### Example Request
 
 ```bash
 curl -X POST http://localhost:8080/reset-alert \
-     -H "Authorization: resettoken" \
      -H "Content-Type: application/json"
 ```
 
@@ -97,7 +183,7 @@ Make sure you have Go installed on your system. You can download it from [Go's o
 Clone the project repository to your local machine:
 
 ```bash
-git clone https://nyxordinal.dev/connection-checker.git
+git clone https://github.com/nyxordinal/connection-checker.git
 cd connection-checker
 ```
 
@@ -132,11 +218,10 @@ go build -o connection-checker
 
 - The application will start monitoring the target server.
 - If the connection fails, an email alert will be sent to the configured recipient.
-- You can manually reset the notification flag by sending a POST request to the `/reset-alert` endpoint.
 
-### 7. Monitor Logs
+### 7. Web UI
 
-The application logs are printed to the console. You can monitor them to observe connection checks, email notifications, and HTTP endpoint requests.
+You can login to Web UI using configured username and password to observe current connection status, last sent email notification and connection check logs.
 
 ## Future Improvements
 

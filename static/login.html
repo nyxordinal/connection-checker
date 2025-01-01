@@ -6,7 +6,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login</title>
     <style>
-        /* Reset some default styles */
         body,
         h1,
         form,
@@ -93,6 +92,12 @@
                 font-size: 14px;
             }
         }
+
+        .toggle-password {
+            cursor: pointer;
+            font-size: 16px;
+            margin-left: 5px;
+        }
     </style>
 </head>
 
@@ -100,15 +105,65 @@
     <div class="login-container">
         <h1>Login</h1>
 
-        <form action="/login" method="POST">
-            <input type="text" name="username" placeholder="Username" required>
-            <input type="password" name="password" placeholder="Password" required>
+        <form id="login-form" action="/login" method="POST">
+            <input type="text" id="username" name="username" placeholder="Username" required>
+            <input type="password" id="password" name="password" placeholder="Password" required>
+            <span class="toggle-password" onclick="togglePassword()">Show password</span><br><br>
             <input type="submit" value="Login">
         </form>
 
-        <!-- Error message display -->
         <div class="error" id="error-message"></div>
     </div>
+
+    <script>
+        const form = document.getElementById("login-form");
+        const errorMessageDiv = document.getElementById("error-message");
+
+        form.addEventListener("submit", async function (event) {
+            event.preventDefault();
+
+            const username = document.getElementById("username").value;
+            const password = document.getElementById("password").value;
+
+            errorMessageDiv.innerText = '';
+
+            try {
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: new URLSearchParams({
+                        username: username,
+                        password: password
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    errorMessageDiv.innerText = errorData.error || 'An unexpected error occurred';
+                    return;
+                }
+
+                window.location.href = '/';
+            } catch (error) {
+                errorMessageDiv.innerText = 'Network error, please try again later';
+            }
+        });
+
+        function togglePassword() {
+            var passwordField = document.getElementById('password');
+            var toggleText = document.querySelector('.toggle-password');
+
+            if (passwordField.type === "password") {
+                passwordField.type = "text";
+                toggleText.textContent = "Hide password";
+            } else {
+                passwordField.type = "password";
+                toggleText.textContent = "Show password";
+            }
+        }
+    </script>
 </body>
 
 </html>

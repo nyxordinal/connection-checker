@@ -21,10 +21,6 @@ type AppContext struct {
 
 var appCtx AppContext
 
-type JsonResponse struct {
-	Message string `json:"message"`
-}
-
 func initApp() {
 	appCtx.Logger = CreateLogger(logrus.InfoLevel)
 
@@ -112,7 +108,7 @@ func startHTTPServer() {
 	rateLimiterPerSecond := createRateLimiter(appCtx.Config.RateLimitThreshold, time.Second)
 	rateLimiterPerMinute := createRateLimiter(appCtx.Config.RateLimitThreshold, time.Minute)
 
-	http.HandleFunc("/reset-alert", rateLimitedHandler(rateLimiterPerSecond, resetAlertHandler))
+	http.HandleFunc("/reset-alert", apiAuthMiddleware(rateLimitedHandler(rateLimiterPerSecond, resetAlertHandler)))
 	http.HandleFunc("/status", apiAuthMiddleware(rateLimitedHandler(rateLimiterPerMinute, statusHandler)))
 	http.HandleFunc("/logs", apiAuthMiddleware(rateLimitedHandler(rateLimiterPerSecond, logsHandler)))
 

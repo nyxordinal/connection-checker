@@ -40,11 +40,9 @@
         table th,
         table td {
             padding: 5px 8px;
-            /* Reduced padding for more compact appearance */
             border: 1px solid #ddd;
             text-align: left;
             font-size: 14px;
-            /* Smaller font size */
         }
 
         table th {
@@ -81,7 +79,11 @@
             background-color: #45a049;
         }
 
-        /* Responsive Design */
+        #reset-alert-message {
+            margin-top: 10px;
+            font-weight: bold;
+        }
+
         @media (max-width: 768px) {
             section {
                 margin: 10px;
@@ -91,7 +93,6 @@
             table th,
             table td {
                 font-size: 13px;
-                /* Slightly smaller font size */
             }
 
             button {
@@ -168,6 +169,34 @@
             fetchLogs(currentPage);
         }
 
+        function resetAlert() {
+            const messageElement = document.getElementById("reset-alert-message");
+            const button = document.getElementById("reset-alert-btn");
+
+            messageElement.textContent = "";
+            messageElement.style.color = "#333";
+            button.disabled = true;
+
+            fetch("/reset-alert", { method: "POST" })
+                .then(response => response.json())
+                .then(data => {
+                    if (!data.error) {
+                        messageElement.textContent = data.message || "Alert reset successfully!";
+                        messageElement.style.color = "green";
+                    } else {
+                        messageElement.textContent = data.message || "An error occurred. Please try again.";
+                        messageElement.style.color = "red";
+                    }
+                })
+                .catch(error => {
+                    messageElement.textContent = "Failed to reset alert. Please try again later.";
+                    messageElement.style.color = "red";
+                })
+                .finally(() => {
+                    button.disabled = false;
+                });
+        }
+
         window.onload = () => {
             fetchConnectionStatus();
             fetchLogs(currentPage);
@@ -184,12 +213,13 @@
         <h2>Current Connection Status</h2>
         <p><strong>Status:</strong> <span id="status">Loading...</span></p>
         <p><strong>Last Notification Sent:</strong> <span id="last-email">Loading...</span></p>
+
+        <button id="reset-alert-btn" onclick="resetAlert()">Reset Alert</button>
+        <p id="reset-alert-message"></p>
     </section>
 
     <section id="connection-logs">
         <h2>Connection Check Logs</h2>
-
-        <!-- Controls for changing items per page -->
         <div>
             <label for="items-per-page">Items per page:</label>
             <select id="items-per-page" onchange="changeItemsPerPage()">
@@ -211,7 +241,6 @@
             </tbody>
         </table>
 
-        <!-- Pagination Controls -->
         <div>
             <button id="prev-btn" onclick="changePage(currentPage - 1)">Previous</button>
             <button id="next-btn" onclick="changePage(currentPage + 1)">Next</button>

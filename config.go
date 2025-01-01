@@ -15,7 +15,6 @@ type Config struct {
 	RecipientEmail     string        `json:"recipient_email"`
 	CheckInterval      time.Duration `json:"check_interval"`
 	AppPort            string        `json:"app_port"`
-	ResetToken         string        `json:"reset_token"`
 	RateLimitThreshold int           `json:"rate_limit_threshold"`
 	JWTSecret          string        `json:"jwt_secret"`
 	Username           string        `json:"username"`

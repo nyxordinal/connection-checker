@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
 	"net/http"
 	"time"
 
@@ -38,7 +37,8 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 			secretKey := []byte(appCtx.Config.JWTSecret)
 			tokenString, err := token.SignedString(secretKey)
 			if err != nil {
-				http.Error(w, "Could not generate token", http.StatusInternalServerError)
+				appCtx.Logger.Error("Could not generate token: ", err)
+				constructResponse(w, http.StatusInternalServerError, "", "Login failed, please try again")
 				return
 			}
 
@@ -49,11 +49,10 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 				HttpOnly: true,
 				MaxAge:   3600,
 			})
-			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
 
-		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		constructResponse(w, http.StatusUnauthorized, "Unauthorized", "Invalid credentials")
 		return
 	}
 
@@ -64,36 +63,10 @@ func rateLimitedHandler(rateLimiter *rate.Limiter, handler http.HandlerFunc) htt
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !rateLimiter.Allow() {
 			appCtx.Logger.Warn("Rate limit reached due to too many requests")
+			constructResponse(w, http.StatusTooManyRequests, "Please slow down and try again in a moment.", "Too Many Requests")
 			return
 		}
 		handler(w, r)
-	}
-}
-
-func resetAlertHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		return
-	}
-
-	token := r.Header.Get("Authorization")
-	if token == "" || token != appCtx.Config.ResetToken {
-		appCtx.Logger.Warn("Unauthorized attempt to reset alert status")
-		return
-	}
-
-	appCtx.Mutex.Lock()
-	appCtx.AlertSent = false
-	appCtx.Mutex.Unlock()
-
-	appCtx.Logger.Info("Alert status reset via HTTP endpoint")
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	response := JsonResponse{
-		Message: "Alert status reset successfully",
-	}
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		appCtx.Logger.Error("Failed to encode JSON response: ", err)
 	}
 }
 
@@ -101,13 +74,12 @@ func statusHandler(w http.ResponseWriter, r *http.Request) {
 	status, lastEmailSent, err := appCtx.DB.getConnectionStatus()
 	if err != nil {
 		if err == sql.ErrNoRows {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"connection_status": "unknown", "last_email_sent": ""})
+			constructResponseWithData(w, http.StatusOK, map[string]string{"connection_status": "unknown", "last_email_sent": ""})
 			return
 		}
 
 		appCtx.Logger.Errorf("Failed to fetch connection status: %v", err)
-		http.Error(w, "Failed to fetch connection status", http.StatusInternalServerError)
+		constructResponse(w, http.StatusInternalServerError, "", "Failed to fetch connection status")
 		return
 	}
 
@@ -115,8 +87,7 @@ func statusHandler(w http.ResponseWriter, r *http.Request) {
 		"connection_status": status,
 		"last_email_sent":   lastEmailSent,
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	constructResponseWithData(w, http.StatusOK, response)
 }
 
 func logsHandler(w http.ResponseWriter, r *http.Request) {
@@ -132,13 +103,22 @@ func logsHandler(w http.ResponseWriter, r *http.Request) {
 	logs, err := appCtx.DB.getConnectionLogs(page, perPage)
 	if err != nil {
 		appCtx.Logger.Errorf("Failed to fetch logs: %v", err)
-		http.Error(w, "Failed to fetch logs", http.StatusInternalServerError)
+		constructResponse(w, http.StatusInternalServerError, "", "Failed to fetch logs")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(logs); err != nil {
-		appCtx.Logger.Errorf("Failed to encode logs: %v", err)
-		http.Error(w, "Failed to encode logs", http.StatusInternalServerError)
+	constructResponseWithData(w, http.StatusOK, logs)
+}
+
+func resetAlertHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		return
 	}
+
+	appCtx.Mutex.Lock()
+	appCtx.AlertSent = false
+	appCtx.Mutex.Unlock()
+
+	appCtx.Logger.Info("Alert status reset triggered by user")
+	constructResponse(w, http.StatusOK, "Alert status reset successfully", "")
 }
